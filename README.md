@@ -60,4 +60,4 @@ It allows students to select courses, choose faculty, manage credits, detect cla
 - Constraint Validation
 - Slot Conflict Detection
 
---
+---
