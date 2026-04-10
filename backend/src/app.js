@@ -71,6 +71,9 @@ app.use((err, _req, res, next) => {
 const start = async () => {
   const mongoUri = process.env.MONGO_URI || "mongodb+srv://PULMOMAP:PulmoMap1234@m0.em9az7e.mongodb.net/?appName=M0";
   const port = Number(process.env.PORT || 5000);
+  if (isProd && !process.env.MONGO_URI) {
+    throw new Error("MONGO_URI is required in production");
+  }
   await mongoose.connect(mongoUri);
   const server = app.listen(port, () => {
     console.log(`Server running on http://localhost:${port}`);
