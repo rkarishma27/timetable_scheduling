@@ -373,7 +373,7 @@ function FullTimetable({ ttMap, selections, highlight, courseName, showTeacher }
 
 // ─── SLOT SELECTION PAGE ───────────────────────────────────────────────────
 function SlotPage({ course, etlPref, setEtlPref, takenTheory, takenLab, usedCr, ttMap, selections, wishlist, regNum, timeLeft, onBack, onConfirm, onLogout }) {
-  const [selTeacher, setSelTeacher] = useState(null);
+  const [selTeacherName, setSelTeacherName] = useState("");
   const teachers = getTeachers(course.code);
   const teachersWithSlotsAll = teachers.map((t, i) => ({ ...t, slots: getTeacherSlots(i, course.code, course.type) }));
   const teachersWithSlots =
@@ -386,10 +386,12 @@ function SlotPage({ course, etlPref, setEtlPref, takenTheory, takenLab, usedCr, 
 
   useEffect(() => {
     // If user switches ETL preference, clear an incompatible previously selected faculty
-    if (course.type !== "ETL" || !selTeacher) return;
+    if (course.type !== "ETL" || !selTeacherName) return;
+    const selected = teachersWithSlots.find((ts) => ts.name === selTeacherName);
+    if (!selected) { setSelTeacherName(""); return; }
     const requiredSuffix = etlPref === "MT" ? "1" : "2";
-    if (!selTeacher.slots?.theory?.endsWith(requiredSuffix)) setSelTeacher(null);
-  }, [etlPref, course.type]);
+    if (!selected.slots?.theory?.endsWith(requiredSuffix)) setSelTeacherName("");
+  }, [etlPref, course.type, selTeacherName, teachersWithSlots]);
 
   function getActive(ts) {
     if (course.type === "ETL") {
@@ -465,15 +467,17 @@ function SlotPage({ course, etlPref, setEtlPref, takenTheory, takenLab, usedCr, 
   }
 
   function confirm() {
-    if (!selTeacher) return;
-    const { theory, lab } = getActive(selTeacher);
-    onConfirm(selTeacher.name, theory, lab);
+    const selected = teachersWithSlots.find((ts) => ts.name === selTeacherName);
+    if (!selected) return;
+    const { theory, lab } = getActive(selected);
+    onConfirm(selected.name, theory, lab);
   }
 
   const afterCr = usedCr + course.credits;
   const overLimit = afterCr > MAX_CR;
-  const selectedClashes = selTeacher ? getClashDetails(selTeacher) : [];
-  const futureConsequences = selTeacher ? getFutureConsequences(selTeacher) : [];
+  const selectedTeacher = teachersWithSlots.find((ts) => ts.name === selTeacherName) || null;
+  const selectedClashes = selectedTeacher ? getClashDetails(selectedTeacher) : [];
+  const futureConsequences = selectedTeacher ? getFutureConsequences(selectedTeacher) : [];
 
   return (
     <div>
@@ -513,11 +517,11 @@ function SlotPage({ course, etlPref, setEtlPref, takenTheory, takenLab, usedCr, 
                 const clash = hasClash(ts);
                 const clashDetails = getClashDetails(ts);
                 const { theory, lab } = getActive(ts);
-                const sel = selTeacher === ts;
+                const sel = selTeacherName === ts.name;
                 return (
                   <div key={i}
                     style={{ background:sel?"rgba(63,185,80,0.08)":"#161b22", border:`1px solid ${sel?"#3fb950":clash?"#da3633":"#21262d"}`, borderRadius:12, padding:"14px 16px", cursor:"pointer", display:"flex", alignItems:"flex-start", justifyContent:"space-between", transition:"border-color 0.15s" }}
-                    onClick={() => setSelTeacher(ts)}>
+                    onClick={() => setSelTeacherName(ts.name)}>
                     <div>
                       <div style={{ fontWeight:700, fontSize:"0.9rem", marginBottom:3 }}>{ts.name}</div>
                       <div style={{ fontSize:"0.75rem", color:ts.seats < 10 ? "#f85149" : "#f0883e", marginBottom:3 }}>Seats left: {ts.seats}</div>
@@ -539,11 +543,11 @@ function SlotPage({ course, etlPref, setEtlPref, takenTheory, takenLab, usedCr, 
               })}
             </div>
 
-            {selTeacher && (
+            {selectedTeacher && (
               <div style={{ background:"#161b22", border:"1px solid #21262d", borderRadius:12, padding:16 }}>
                 {selectedClashes.length > 0 && (
                   <div style={{ marginBottom:12, padding:"10px 12px", borderRadius:8, background:"rgba(248,81,73,0.1)", border:"1px solid rgba(248,81,73,0.25)", color:"#ff7b72", fontSize:"0.78rem", lineHeight:1.45 }}>
-                    Choosing <strong>{selTeacher.name}</strong> will clash with:
+                    Choosing <strong>{selectedTeacher.name}</strong> will clash with:
                     <div style={{ marginTop:6 }}>
                       {selectedClashes.map((msg, idx) => (
                         <div key={idx}>• {msg}</div>
@@ -553,7 +557,7 @@ function SlotPage({ course, etlPref, setEtlPref, takenTheory, takenLab, usedCr, 
                 )}
                 {futureConsequences.length > 0 && (
                   <div style={{ marginBottom:12, padding:"10px 12px", borderRadius:8, background:"rgba(240,136,62,0.08)", border:"1px solid rgba(240,136,62,0.3)", color:"#f0b37e", fontSize:"0.78rem", lineHeight:1.45 }}>
-                    Choosing <strong>{selTeacher.name}</strong> for <strong>{course.code}</strong> may reduce options in upcoming courses:
+                    Choosing <strong>{selectedTeacher.name}</strong> for <strong>{course.code}</strong> may reduce options in upcoming courses:
                     <div style={{ marginTop:6 }}>
                       {futureConsequences.map((c, idx) => (
                         <div key={idx}>
@@ -582,7 +586,7 @@ function SlotPage({ course, etlPref, setEtlPref, takenTheory, takenLab, usedCr, 
               <FullTimetable
                 ttMap={ttMap}
                 selections={[]}
-                highlight={selTeacher ? getActive(selTeacher) : {}}
+                highlight={selectedTeacher ? getActive(selectedTeacher) : {}}
                 courseName={course.code.slice(-4)}
                 showTeacher={false}
               />
