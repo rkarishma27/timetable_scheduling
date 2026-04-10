@@ -69,7 +69,7 @@ app.use((err, _req, res, next) => {
 });
 
 const start = async () => {
-  const mongoUri = process.env.MONGO_URI || "mongodb+srv://PULMOMAP:PULMOMAP@m0.em9az7e.mongodb.net/timetable?retryWrites=true&w=majority&appName=M0";
+  const mongoUri = process.env.MONGO_URI || "mongodb+srv://PULMOMAP:<PulmoMap1234>@m0.em9az7e.mongodb.net/?appName=M0";
   const port = Number(process.env.PORT || 5000);
   await mongoose.connect(mongoUri);
   const server = app.listen(port, () => {
