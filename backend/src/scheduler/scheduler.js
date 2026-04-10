@@ -4,7 +4,6 @@ function schedule(subjects, slots, rooms) {
 
     let timetable = [];
 
-    // Sort subjects (heuristic)
     subjects.sort((a, b) => a.hoursPerWeek - b.hoursPerWeek);
 
     function backtrack(index) {
@@ -13,7 +12,6 @@ function schedule(subjects, slots, rooms) {
 
         let subject = subjects[index];
 
-        // LAB handling (2 continuous slots)
         if (subject.type === "lab") {
 
             for (let i = 0; i < slots.length - 1; i++) {
@@ -82,8 +80,8 @@ function schedule(subjects, slots, rooms) {
         return false;
     }
 
-    backtrack(0);
-    return timetable;
+    const ok = backtrack(0);
+    return ok ? timetable : [];
 }
 
 module.exports = { schedule };

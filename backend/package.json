@@ -3,7 +3,8 @@
   "version": "1.0.0",
   "main": "src/app.js",
   "scripts": {
-    "start": "node src/app.js"
+    "start": "node src/app.js",
+    "seed": "node seed.js"
   },
   "dependencies": {
     "cors": "^2.8.6",

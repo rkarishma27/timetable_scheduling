@@ -23,7 +23,10 @@ function isValid(assign, timetable, subject, slot, room) {
 
     if (isLunch(slot)) return false;
 
-    if (isSlotUsed(slot._id, timetable)) return false;
+    if (typeof slot?.isLabSlot === "boolean") {
+        if (subject.type === "lab" && !slot.isLabSlot) return false;
+        if (subject.type === "theory" && slot.isLabSlot) return false;
+    }
 
     if (isFacultyBusy(subject.facultyId, slot._id, timetable)) return false;
 

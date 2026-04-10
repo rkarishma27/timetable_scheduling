@@ -17,6 +17,7 @@ const TIME_LABELS = [
 ];
 
 const MAX_CR = 25;
+const API_BASE_URL = process.env.REACT_APP_API_BASE_URL || "http://localhost:5000";
 
 const LAB_PAIRS = [
   "L1+L2","L3+L4","L5+L6","L7+L8","L9+L10","L11+L12",
@@ -371,13 +372,31 @@ function FullTimetable({ ttMap, selections, highlight, courseName, showTeacher }
 }
 
 // ─── SLOT SELECTION PAGE ───────────────────────────────────────────────────
-function SlotPage({ course, etlPref, setEtlPref, takenTheory, takenLab, usedCr, ttMap, regNum, timeLeft, onBack, onConfirm, onLogout }) {
+function SlotPage({ course, etlPref, setEtlPref, takenTheory, takenLab, usedCr, ttMap, selections, wishlist, regNum, timeLeft, onBack, onConfirm, onLogout }) {
   const [selTeacher, setSelTeacher] = useState(null);
   const teachers = getTeachers(course.code);
-  const teachersWithSlots = teachers.map((t, i) => ({ ...t, slots: getTeacherSlots(i, course.code, course.type) }));
+  const teachersWithSlotsAll = teachers.map((t, i) => ({ ...t, slots: getTeacherSlots(i, course.code, course.type) }));
+  const teachersWithSlots =
+    course.type === "ETL"
+      ? teachersWithSlotsAll.filter((ts) => {
+          const requiredSuffix = etlPref === "MT" ? "1" : "2"; // MT -> Txx1, EM -> Txx2
+          return ts.slots?.theory?.endsWith(requiredSuffix);
+        })
+      : teachersWithSlotsAll;
+
+  useEffect(() => {
+    // If user switches ETL preference, clear an incompatible previously selected faculty
+    if (course.type !== "ETL" || !selTeacher) return;
+    const requiredSuffix = etlPref === "MT" ? "1" : "2";
+    if (!selTeacher.slots?.theory?.endsWith(requiredSuffix)) setSelTeacher(null);
+  }, [etlPref, course.type]);
 
   function getActive(ts) {
-    if (course.type === "ETL") return { theory: ts.slots.theory, lab: etlPref === "MT" ? ts.slots.labMorn : ts.slots.labEve };
+    if (course.type === "ETL") {
+      // MT: Morning Theory + Evening Lab, EM: Evening Theory + Morning Lab
+      const lab = etlPref === "MT" ? ts.slots.labEve : ts.slots.labMorn;
+      return { theory: ts.slots.theory, lab };
+    }
     return { theory: ts.slots.theory, lab: ts.slots.lab };
   }
 
@@ -388,6 +407,63 @@ function SlotPage({ course, etlPref, setEtlPref, takenTheory, takenLab, usedCr, 
     return false;
   }
 
+  function getClashDetails(ts) {
+    const { theory, lab } = getActive(ts);
+    const labs = lab ? lab.split("+") : [];
+    return selections
+      .filter((s) => s.course.code !== course.code)
+      .filter((s) => {
+        const theoryClash = theory && s.theorySlot === theory;
+        const labClash = labs.length > 0 && s.labSlot && labs.some((l) => s.labSlot.split("+").includes(l));
+        return theoryClash || labClash;
+      })
+      .map((s) => `${s.teacher || "Faculty"} in ${s.course.code} (${s.course.title})`);
+  }
+
+  function optionsForCourse(targetCourse) {
+    const teachers = getTeachers(targetCourse.code);
+    const teacherSlots = teachers.map((t, i) => ({ ...t, slots: getTeacherSlots(i, targetCourse.code, targetCourse.type) }));
+    const filtered = targetCourse.type === "ETL"
+      ? teacherSlots.filter((x) => x.slots?.theory?.endsWith(etlPref === "MT" ? "1" : "2"))
+      : teacherSlots;
+    return filtered.map((ts) => {
+      if (targetCourse.type === "ETL") {
+        const lab = etlPref === "MT" ? ts.slots.labEve : ts.slots.labMorn;
+        return { teacher: ts.name, theory: ts.slots.theory, lab };
+      }
+      return { teacher: ts.name, theory: ts.slots.theory, lab: ts.slots.lab };
+    });
+  }
+
+  function slotsConflict(a, b) {
+    const aLabs = a.lab ? a.lab.split("+") : [];
+    const bLabs = b.lab ? b.lab.split("+") : [];
+    const theoryConflict = a.theory && b.theory && a.theory === b.theory;
+    const labConflict = aLabs.some((l) => bLabs.includes(l));
+    return theoryConflict || labConflict;
+  }
+
+  function getFutureConsequences(ts) {
+    const chosen = getActive(ts);
+    return wishlist
+      .filter((w) => w.course.code !== course.code)
+      .filter((w) => !selections.some((s) => s.course.code === w.course.code))
+      .map((w) => {
+        if (w.course.type === "OC") return null;
+        const opts = optionsForCourse(w.course);
+        const blocked = opts.filter((opt) => slotsConflict(chosen, opt)).map((opt) => opt.teacher);
+        if (blocked.length === 0) return null;
+        const remaining = opts.length - blocked.length;
+        return {
+          courseCode: w.course.code,
+          courseTitle: w.course.title,
+          blocked,
+          remaining,
+        };
+      })
+      .filter(Boolean);
+  }
+
   function confirm() {
     if (!selTeacher) return;
     const { theory, lab } = getActive(selTeacher);
@@ -396,12 +472,14 @@ function SlotPage({ course, etlPref, setEtlPref, takenTheory, takenLab, usedCr, 
 
   const afterCr = usedCr + course.credits;
   const overLimit = afterCr > MAX_CR;
+  const selectedClashes = selTeacher ? getClashDetails(selTeacher) : [];
+  const futureConsequences = selTeacher ? getFutureConsequences(selTeacher) : [];
 
   return (
     <div>
       <Topbar regNum={regNum} used={usedCr} max={MAX_CR} timeLeft={timeLeft} onLogout={onLogout} />
       <div style={pageWrap}>
-        <button style={backBtnStyle} onClick={onBack}>← Back to Subjects</button>
+        <button style={backBtnStyle} onClick={onBack}>← Back to Faculty Selection</button>
         <PageHeader
           title={course.title}
           sub={
@@ -433,12 +511,13 @@ function SlotPage({ course, etlPref, setEtlPref, takenTheory, takenLab, usedCr, 
             <div style={{ display:"flex", flexDirection:"column", gap:10, marginBottom:24 }}>
               {teachersWithSlots.map((ts, i) => {
                 const clash = hasClash(ts);
+                const clashDetails = getClashDetails(ts);
                 const { theory, lab } = getActive(ts);
                 const sel = selTeacher === ts;
                 return (
                   <div key={i}
-                    style={{ background:sel?"rgba(88,166,255,0.06)":"#161b22", border:`1px solid ${sel?"#58a6ff":clash?"#da3633":"#21262d"}`, borderRadius:12, padding:"14px 16px", cursor:clash?"not-allowed":"pointer", opacity:clash?0.45:1, display:"flex", alignItems:"flex-start", justifyContent:"space-between", transition:"border-color 0.15s" }}
-                    onClick={() => !clash && setSelTeacher(ts)}>
+                    style={{ background:sel?"rgba(63,185,80,0.08)":"#161b22", border:`1px solid ${sel?"#3fb950":clash?"#da3633":"#21262d"}`, borderRadius:12, padding:"14px 16px", cursor:"pointer", display:"flex", alignItems:"flex-start", justifyContent:"space-between", transition:"border-color 0.15s" }}
+                    onClick={() => setSelTeacher(ts)}>
                     <div>
                       <div style={{ fontWeight:700, fontSize:"0.9rem", marginBottom:3 }}>{ts.name}</div>
                       <div style={{ fontSize:"0.75rem", color:ts.seats < 10 ? "#f85149" : "#f0883e", marginBottom:3 }}>Seats left: {ts.seats}</div>
@@ -447,9 +526,14 @@ function SlotPage({ course, etlPref, setEtlPref, takenTheory, takenLab, usedCr, 
                         {theory && <SlotBadge slot={theory} type="theory" taken={takenTheory.has(theory)} />}
                         {lab && lab.split("+").map(l => <SlotBadge key={l} slot={"Lab:"+l} type="lab" taken={takenLab.has(l)} />)}
                       </div>
+                      {clashDetails.length > 0 && (
+                        <div style={{ marginTop:8, fontSize:"0.72rem", color:"#ff7b72", lineHeight:1.4 }}>
+                          Choosing {ts.name.split(" ")[0]} clashes with {clashDetails.slice(0, 2).join(" and ")}{clashDetails.length > 2 ? "..." : ""}.
+                        </div>
+                      )}
                     </div>
                     {clash && <span style={{ fontSize:"0.7rem", color:"#f85149", fontWeight:700, background:"rgba(248,81,73,0.1)", padding:"3px 9px", borderRadius:6, whiteSpace:"nowrap" }}>⚠ CLASH</span>}
-                    {sel && !clash && <span style={{ fontSize:"0.9rem", color:"#3fb950", background:"rgba(63,185,80,0.12)", width:28, height:28, borderRadius:"50%", display:"flex", alignItems:"center", justifyContent:"center", fontWeight:700 }}>✓</span>}
+                    {sel && <span style={{ fontSize:"0.9rem", color:"#3fb950", background:"rgba(63,185,80,0.12)", width:28, height:28, borderRadius:"50%", display:"flex", alignItems:"center", justifyContent:"center", fontWeight:700 }}>✓</span>}
                   </div>
                 );
               })}
@@ -457,14 +541,36 @@ function SlotPage({ course, etlPref, setEtlPref, takenTheory, takenLab, usedCr, 
 
             {selTeacher && (
               <div style={{ background:"#161b22", border:"1px solid #21262d", borderRadius:12, padding:16 }}>
+                {selectedClashes.length > 0 && (
+                  <div style={{ marginBottom:12, padding:"10px 12px", borderRadius:8, background:"rgba(248,81,73,0.1)", border:"1px solid rgba(248,81,73,0.25)", color:"#ff7b72", fontSize:"0.78rem", lineHeight:1.45 }}>
+                    Choosing <strong>{selTeacher.name}</strong> will clash with:
+                    <div style={{ marginTop:6 }}>
+                      {selectedClashes.map((msg, idx) => (
+                        <div key={idx}>• {msg}</div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {futureConsequences.length > 0 && (
+                  <div style={{ marginBottom:12, padding:"10px 12px", borderRadius:8, background:"rgba(240,136,62,0.08)", border:"1px solid rgba(240,136,62,0.3)", color:"#f0b37e", fontSize:"0.78rem", lineHeight:1.45 }}>
+                    Choosing <strong>{selTeacher.name}</strong> for <strong>{course.code}</strong> may reduce options in upcoming courses:
+                    <div style={{ marginTop:6 }}>
+                      {futureConsequences.map((c, idx) => (
+                        <div key={idx}>
+                          • <strong>{c.courseCode}</strong>: blocks {c.blocked.slice(0, 2).join(", ")}{c.blocked.length > 2 ? "..." : ""} ({c.remaining} option{c.remaining !== 1 ? "s" : ""} left)
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
                 <div style={{ fontSize:"0.84rem", color:"#8b949e", marginBottom:12 }}>
                   Credits after adding: <strong style={{ color:"#58a6ff" }}>{afterCr}</strong> / {MAX_CR}
                   {overLimit && <span style={{ color:"#f85149", marginLeft:8 }}>⚠ Exceeds limit!</span>}
                 </div>
                 <button
-                  style={{ ...btnPrimary, background:overLimit?"#21262d":"linear-gradient(135deg,#238636,#1a6e2e)", cursor:overLimit?"not-allowed":"pointer", opacity:overLimit?0.5:1 }}
-                  onClick={confirm} disabled={overLimit}>
-                  Confirm Selection →
+                  style={{ ...btnPrimary, background:(overLimit || selectedClashes.length > 0)?"#21262d":"linear-gradient(135deg,#238636,#1a6e2e)", cursor:(overLimit || selectedClashes.length > 0)?"not-allowed":"pointer", opacity:(overLimit || selectedClashes.length > 0)?0.5:1 }}
+                  onClick={confirm} disabled={overLimit || selectedClashes.length > 0}>
+                  {selectedClashes.length > 0 ? "Resolve Clash to Continue" : "Confirm Selection →"}
                 </button>
               </div>
             )}
@@ -571,8 +677,11 @@ export default function App() {
   const [currentCourse, setCurrentCourse] = useState(null);
   const [etlPref, setEtlPref]             = useState("MT");
   const [selections, setSelections]       = useState([]);
+  const [wishlist, setWishlist]           = useState([]);
+  const [backendTTMap, setBackendTTMap] = useState(null);
   const [isFinalized, setIsFinalized]     = useState(false);
   const [creditModal, setCreditModal]     = useState(null);
+  const [userSavedRows, setUserSavedRows] = useState([]);
 
   useEffect(() => {
     if (page !== "login" && timeLeft > 0) {
@@ -585,26 +694,96 @@ export default function App() {
   const takenTheory = new Set(selections.flatMap(x => x.theorySlot ? [x.theorySlot] : []));
   const takenLab    = new Set(selections.flatMap(x => x.labSlot ? x.labSlot.split("+") : []));
 
-  const ttMap = {};
+  const clientTTMap = {};
   selections.forEach(sc => {
     const short = sc.course.code.slice(-4);
-    if (sc.theorySlot) ttMap[sc.theorySlot] = short;
-    if (sc.labSlot) sc.labSlot.split("+").forEach(l => { ttMap[l] = short; });
+    if (sc.theorySlot) clientTTMap[sc.theorySlot] = short;
+    if (sc.labSlot) sc.labSlot.split("+").forEach(l => { clientTTMap[l] = short; });
   });
+
+  const ttMap = backendTTMap || clientTTMap;
 
   function refreshCap() { setCapText(genCaptcha()); setCapInput(""); }
 
-  function doLogin() {
+  function buildTTMapFromSavedRows(rows) {
+    const map = {};
+    rows.forEach((r) => {
+      const slot = (r?.slotId || "").toString();
+      const code = (r?.subjectId || "").toString();
+      // Works when slotId is saved as UI slot code (A1, L1, ...).
+      if (/^(?:[A-Z]{1,3}\d{1,2}|L\d{1,2})$/.test(slot) && code.length >= 4) {
+        map[slot] = code.slice(-4);
+      }
+    });
+    return map;
+  }
+
+  async function doLogin() {
     setLoginErr("");
     if (!/^\d{2}[A-Z]{3}\d{4}$/i.test(regNum)) { setLoginErr("Invalid reg. number — e.g. 22BCB0001"); return; }
     if (password.length < 6) { setLoginErr("Password must be at least 6 characters"); return; }
     if (capInput.toUpperCase() !== capText) { setLoginErr("CAPTCHA mismatch — please try again"); refreshCap(); return; }
-    setPage("courses");
+    try {
+      const sessionRes = await fetch(`${API_BASE_URL}/api/users/session`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ regNum, password }),
+      });
+      if (!sessionRes.ok) {
+        const err = await sessionRes.json().catch(() => ({}));
+        setLoginErr(err.error || "Invalid credentials");
+        return;
+      }
+
+      const stateRes = await fetch(`${API_BASE_URL}/api/users/state?regNum=${encodeURIComponent(regNum)}`);
+      if (stateRes.ok) {
+        const payload = await stateRes.json();
+        const state = payload?.appState || {};
+        if (Array.isArray(state.wishlist)) setWishlist(state.wishlist);
+        if (Array.isArray(state.selections)) setSelections(state.selections);
+        if (state.ttMap && typeof state.ttMap === "object") setBackendTTMap(state.ttMap);
+        if (typeof state.isFinalized === "boolean") setIsFinalized(state.isFinalized);
+      } else {
+        // Backward compatibility: restore from timetable rows if user state is unavailable.
+        const res = await fetch(`${API_BASE_URL}/api/timetable?regNum=${encodeURIComponent(regNum)}`);
+        if (res.ok) {
+          const rows = await res.json();
+          if (Array.isArray(rows) && rows.length > 0) {
+            setUserSavedRows(rows);
+            const restoredMap = buildTTMapFromSavedRows(rows);
+            if (Object.keys(restoredMap).length > 0) setBackendTTMap(restoredMap);
+            setIsFinalized(true);
+          }
+        }
+      }
+    } catch (e) {
+      console.warn("Could not restore saved state:", e);
+    }
+    setPage("wishlist");
   }
 
   function handleLogout() {
     setPage("login"); setSelections([]); setIsFinalized(false); setTimeLeft(2700);
     setRegNum(""); setPassword(""); setCapInput(""); setCapText(genCaptcha()); setLoginErr(""); setCreditModal(null);
+    setWishlist([]);
+    setBackendTTMap(null);
+    setUserSavedRows([]);
+  }
+
+  const isWishlisted = (code) => wishlist.some((w) => w.course.code === code);
+  function toggleWishlist(course, cat) {
+    setWishlist((prev) => {
+      const exists = prev.some((w) => w.course.code === course.code);
+      if (exists) return prev.filter((w) => w.course.code !== course.code);
+      return [...prev, { course, cat }];
+    });
+  }
+  function beginFacultySelection() {
+    if (wishlist.length === 0) {
+      alert("Please add at least one course to your wishlist.");
+      return;
+    }
+    setPage("faculty");
   }
 
   function handleSelectCourse(course, cat) {
@@ -612,7 +791,7 @@ export default function App() {
     setCurrentCourse({ course, cat });
     if (course.type === "OC") {
       setSelections(prev => [...prev.filter(x => x.course.code !== course.code), { course, cat, teacher:"Online", theorySlot:null, labSlot:null }]);
-      setPage("courses");
+      setPage("faculty");
     } else {
       setPage("slots");
     }
@@ -625,16 +804,17 @@ export default function App() {
       ...prev.filter(x => x.course.code !== currentCourse.course.code),
       { course: currentCourse.course, cat: currentCourse.cat, teacher, theorySlot, labSlot }
     ]);
-    setPage("subjects");
+    setPage("faculty");
   }
   const handleFinalSubmit = async () => {
   try {
     console.log("Sending selections:", selections);
+    setBackendTTMap(null);
 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 5000);
 
-    const res = await fetch("http://localhost:5000/api/timetable/generate", {
+    const res = await fetch(`${API_BASE_URL}/api/timetable/generate`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json"
@@ -651,6 +831,35 @@ export default function App() {
     console.log("Backend response:", data);
 
     if (data.success) {
+      setBackendTTMap(data.ttMap || null);
+
+      // Persist per user so multiple users can use the same backend concurrently.
+      try {
+        await fetch(`${API_BASE_URL}/api/timetable/save`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ regNum, timetable: data.timetable || [] }),
+        });
+      } catch (saveErr) {
+        console.warn("Save failed:", saveErr);
+      }
+
+      try {
+        await fetch(`${API_BASE_URL}/api/users/state`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            regNum,
+            wishlist,
+            selections,
+            ttMap: data.ttMap || {},
+            isFinalized: true,
+          }),
+        });
+      } catch (stateErr) {
+        console.warn("User state save failed:", stateErr);
+      }
+
       setIsFinalized(true);
       setPage("timetable");
     } else {
@@ -761,6 +970,112 @@ export default function App() {
         </div>
       )}
 
+      {/* WISHLIST */}
+      {page === "wishlist" && (
+        <div>
+          <Topbar regNum={regNum} used={usedCr} max={MAX_CR} timeLeft={timeLeft} onLogout={handleLogout} />
+          <div style={pageWrap}>
+            <PageHeader title="Build Your Wishlist" sub="First choose courses, then select faculty/slots only for these courses." />
+            {Object.entries(CAT_INFO).map(([cat, info]) => (
+              <div key={cat} style={{ marginBottom:20 }}>
+                <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:10 }}>
+                  <span>{info.emoji}</span>
+                  <span style={{ fontWeight:700, color:info.color }}>{info.label}</span>
+                  <span style={{ color:"#8b949e", fontSize:"0.76rem" }}>({COURSES[cat].length} courses)</span>
+                  <span style={{ marginLeft:"auto", color:"#8b949e", fontSize:"0.74rem" }}>
+                    {wishlist.filter((w) => w.cat === cat).length} selected
+                  </span>
+                </div>
+                <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(260px,1fr))", gap:12 }}>
+                  {COURSES[cat].map((course) => {
+                    const sel = isWishlisted(course.code);
+                    return (
+                      <div key={course.code} style={{ background:"#161b22", border:`1px solid ${sel ? "#3fb950" : "#21262d"}`, borderRadius:12, padding:14 }}>
+                        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:8 }}>
+                          <TypeBadge type={course.type} />
+                          <span style={{ fontFamily:"monospace", fontSize:"0.75rem", color:"#8b949e" }}>{cat}</span>
+                        </div>
+                        <div style={{ fontSize:"0.84rem", fontWeight:700, marginBottom:4 }}>{course.title}</div>
+                        <div style={{ fontFamily:"monospace", fontSize:"0.72rem", color:"#58a6ff", marginBottom:8 }}>{course.code}</div>
+                        <div style={{ fontSize:"0.73rem", color:"#8b949e", marginBottom:12 }}>Credits: {course.credits}</div>
+                        <button
+                          onClick={() => toggleWishlist(course, cat)}
+                          style={sel ? btnSel : btnAct}
+                        >
+                          {sel ? "✓ Wishlisted" : "Add to Wishlist"}
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+            <div style={{ marginTop:20, display:"flex", alignItems:"center", gap:12 }}>
+              <span style={{ color:"#8b949e", fontSize:"0.82rem" }}>{wishlist.length} course(s) in wishlist</span>
+              <button style={{ ...btnPrimary, width:"auto", padding:"10px 20px" }} onClick={beginFacultySelection}>
+                Continue to Faculty Selection →
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* FACULTY SUBJECT LIST (from wishlist) */}
+      {page === "faculty" && (
+        <div>
+          <Topbar regNum={regNum} used={usedCr} max={MAX_CR} timeLeft={timeLeft} onLogout={handleLogout} />
+          <div style={pageWrap}>
+            <button style={backBtnStyle} onClick={() => setPage("wishlist")}>← Back to Wishlist</button>
+            <PageHeader title="Faculty Selection" sub="Select faculty and slots only for your wishlisted courses." />
+            <div style={{ overflowX:"auto", borderRadius:12, border:"1px solid #21262d", overflow:"hidden" }}>
+              <table style={{ width:"100%", borderCollapse:"collapse", fontSize:"0.86rem" }}>
+                <thead>
+                  <tr style={{ background:"#161b22" }}>
+                    {["S.No","Code","Title","Type","L","T","P","J","Credits",""].map(h => (
+                      <th key={h} style={{ padding:"10px 14px", textAlign:"left", fontSize:"0.7rem", color:"#8b949e", textTransform:"uppercase", letterSpacing:"0.06em", borderBottom:"1px solid #21262d", whiteSpace:"nowrap" }}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {wishlist.map(({ course, cat }, i) => {
+                    const isSel = selections.some(x => x.course.code === course.code);
+                    const wouldOvr = course.credits > 0 && !isSel && usedCr + course.credits > MAX_CR;
+                    return (
+                      <tr key={course.code} style={{ borderBottom:"1px solid #161b22", background:isSel?"rgba(63,185,80,0.05)":"transparent" }}>
+                        <td style={td}>{i+1}</td>
+                        <td style={{ ...td, fontFamily:"monospace", fontSize:"0.77rem", color:"#58a6ff" }}>{course.code}</td>
+                        <td style={{ ...td, fontWeight:600, maxWidth:240 }}>
+                          {course.title}
+                          {wouldOvr && <span style={{ marginLeft:8, fontSize:"0.65rem", color:"#f85149", background:"rgba(248,81,73,0.1)", border:"1px solid rgba(248,81,73,0.25)", padding:"1px 7px", borderRadius:5, verticalAlign:"middle" }}>+{course.credits}cr over limit</span>}
+                        </td>
+                        <td style={td}><TypeBadge type={course.type} /></td>
+                        {[course.L,course.T,course.P,course.J].map((v,k) => (
+                          <td key={k} style={{ ...td, textAlign:"center", fontFamily:"monospace", color:"#8b949e" }}>{v}</td>
+                        ))}
+                        <td style={{ ...td, textAlign:"center", fontFamily:"monospace", fontWeight:700, color:"#f0883e" }}>{course.credits}</td>
+                        <td style={td}>
+                          {isSel
+                            ? <button style={btnSel} onClick={() => handleRemove(course.code)}>✓ Remove</button>
+                            : <button style={btnAct} onClick={() => handleSelectCourse(course, cat)}>{course.type === "OC" ? "Add →" : "Choose Slot →"}</button>
+                          }
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            {selections.length > 0 && (
+              <div style={{ marginTop:20, display:"flex", gap:10, flexWrap:"wrap" }}>
+                <button style={{ ...btnPrimary, width:"auto", padding:"9px 22px", fontSize:"0.88rem", background:"linear-gradient(135deg,#238636,#1a6e2e)" }} onClick={() => setPage("timetable")}>View My Timetable →</button>
+                <button style={{ background:"#30363d", color:"#fff", padding:"9px 22px", borderRadius:8, border:"none", cursor:"pointer" }} onClick={() => setPage("final")}>Done Selecting →</button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* SUBJECTS */}
       {page === "subjects" && currentCat && (
         <div>
@@ -824,9 +1139,11 @@ export default function App() {
           takenLab={takenLab}
           usedCr={usedCr}
           ttMap={ttMap}
+          selections={selections}
+          wishlist={wishlist}
           regNum={regNum}
           timeLeft={timeLeft}
-          onBack={() => setPage("subjects")}
+          onBack={() => setPage("faculty")}
           onConfirm={handleConfirmSlot}
           onLogout={handleLogout}
         />
@@ -840,7 +1157,7 @@ export default function App() {
           regNum={regNum}
           usedCr={usedCr}
           timeLeft={timeLeft}
-          onBack={() => { if (!isFinalized) setPage("courses"); }}
+          onBack={() => { if (!isFinalized) setPage("faculty"); }}
           isFinalized={isFinalized}
           goHome={() => setPage("home")}
           onLogout={handleLogout}
