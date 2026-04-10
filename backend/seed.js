@@ -34,7 +34,7 @@ const FACULTY = [
 
 async function seed() {
   const mongoUri =
-    process.env.MONGO_URI || "mongodb://127.0.0.1:27017/timetable";
+    process.env.MONGO_URI || "mongodb+srv://timetablescheduler:TS1234@timetablescheduler.jgeqfqk.mongodb.net/?appName=timetablescheduler";
 
   await mongoose.connect(mongoUri);
 

@@ -728,7 +728,7 @@ export default function App() {
     if (password.length < 6) { setLoginErr("Password must be at least 6 characters"); return; }
     if (capInput.toUpperCase() !== capText) { setLoginErr("CAPTCHA mismatch — please try again"); refreshCap(); return; }
     try {
-      const sessionRes = await fetch(`${API_BASE_URL}/api/users/session`, {
+      const sessionRes = await fetch(`${process.env.REACT_APP_API_URL}/api/users/session`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ regNum, password }),
@@ -739,7 +739,7 @@ export default function App() {
         return;
       }
 
-      const stateRes = await fetch(`${API_BASE_URL}/api/users/state?regNum=${encodeURIComponent(regNum)}`);
+      const stateRes = await fetch(`${process.env.REACT_APP_API_URL}/api/users/state?regNum=${encodeURIComponent(regNum)}`);
       if (stateRes.ok) {
         const payload = await stateRes.json();
         const state = payload?.appState || {};
@@ -749,7 +749,7 @@ export default function App() {
         if (typeof state.isFinalized === "boolean") setIsFinalized(state.isFinalized);
       } else {
         // Backward compatibility: restore from timetable rows if user state is unavailable.
-        const res = await fetch(`${API_BASE_URL}/api/timetable?regNum=${encodeURIComponent(regNum)}`);
+        const res = await fetch(`${process.env.REACT_APP_API_URL}/api/timetable?regNum=${encodeURIComponent(regNum)}`);
         if (res.ok) {
           const rows = await res.json();
           if (Array.isArray(rows) && rows.length > 0) {
@@ -818,7 +818,7 @@ export default function App() {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 5000);
 
-    const res = await fetch(`${API_BASE_URL}/api/timetable/generate`, {
+    const res = await fetch(`${process.env.REACT_APP_API_URL}/api/timetable/generate`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json"
@@ -839,7 +839,7 @@ export default function App() {
 
       // Persist per user so multiple users can use the same backend concurrently.
       try {
-        await fetch(`${API_BASE_URL}/api/timetable/save`, {
+        await fetch(`${process.env.REACT_APP_API_URL}/api/timetable/save`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ regNum, timetable: data.timetable || [] }),
@@ -849,7 +849,7 @@ export default function App() {
       }
 
       try {
-        await fetch(`${API_BASE_URL}/api/users/state`, {
+        await fetch(`${process.env.REACT_APP_API_URL}/api/users/state`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
