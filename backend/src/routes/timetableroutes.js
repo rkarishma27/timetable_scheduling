@@ -5,7 +5,7 @@ const {
     generateTimetable,
     saveTimetable,
     getTimetable
-} = require("../controllers/timetableController");
+} = require("../controllers/timetablecontroller");
 
 router.post("/generate", generateTimetable);
 router.post("/save", saveTimetable);
