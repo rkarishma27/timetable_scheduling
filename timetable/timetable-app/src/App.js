@@ -17,7 +17,7 @@ const TIME_LABELS = [
 ];
 
 const MAX_CR = 25;
-const API_BASE_URL = process.env.REACT_APP_API_BASE_URL || "http://localhost:5000";
+const REACT_APP_API_URL = process.env.REACT_APP_API_BASE_URL || "https://timetable-scheduling-pagl.onrender.com";
 
 const LAB_PAIRS = [
   "L1+L2","L3+L4","L5+L6","L7+L8","L9+L10","L11+L12",
@@ -685,7 +685,6 @@ export default function App() {
   const [backendTTMap, setBackendTTMap] = useState(null);
   const [isFinalized, setIsFinalized]     = useState(false);
   const [creditModal, setCreditModal]     = useState(null);
-  const [userSavedRows, setUserSavedRows] = useState([]);
 
   useEffect(() => {
     if (page !== "login" && timeLeft > 0) {
@@ -728,7 +727,7 @@ export default function App() {
     if (password.length < 6) { setLoginErr("Password must be at least 6 characters"); return; }
     if (capInput.toUpperCase() !== capText) { setLoginErr("CAPTCHA mismatch — please try again"); refreshCap(); return; }
     try {
-      const sessionRes = await fetch(`${process.env.REACT_APP_API_URL}/api/users/session`, {
+      const sessionRes = await fetch(`${REACT_APP_API_URL}/api/users/session`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ regNum, password }),
@@ -739,7 +738,7 @@ export default function App() {
         return;
       }
 
-      const stateRes = await fetch(`${process.env.REACT_APP_API_URL}/api/users/state?regNum=${encodeURIComponent(regNum)}`);
+      const stateRes = await fetch(`${REACT_APP_API_URL}/api/users/state?regNum=${encodeURIComponent(regNum)}`);
       if (stateRes.ok) {
         const payload = await stateRes.json();
         const state = payload?.appState || {};
@@ -749,11 +748,10 @@ export default function App() {
         if (typeof state.isFinalized === "boolean") setIsFinalized(state.isFinalized);
       } else {
         // Backward compatibility: restore from timetable rows if user state is unavailable.
-        const res = await fetch(`${process.env.REACT_APP_API_URL}/api/timetable?regNum=${encodeURIComponent(regNum)}`);
+        const res = await fetch(`${REACT_APP_API_URL}/api/timetable?regNum=${encodeURIComponent(regNum)}`);
         if (res.ok) {
           const rows = await res.json();
           if (Array.isArray(rows) && rows.length > 0) {
-            setUserSavedRows(rows);
             const restoredMap = buildTTMapFromSavedRows(rows);
             if (Object.keys(restoredMap).length > 0) setBackendTTMap(restoredMap);
             setIsFinalized(true);
@@ -771,7 +769,6 @@ export default function App() {
     setRegNum(""); setPassword(""); setCapInput(""); setCapText(genCaptcha()); setLoginErr(""); setCreditModal(null);
     setWishlist([]);
     setBackendTTMap(null);
-    setUserSavedRows([]);
   }
 
   const isWishlisted = (code) => wishlist.some((w) => w.course.code === code);
@@ -818,7 +815,7 @@ export default function App() {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 5000);
 
-    const res = await fetch(`${process.env.REACT_APP_API_URL}/api/timetable/generate`, {
+    const res = await fetch(`${REACT_APP_API_URL}/api/timetable/generate`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json"
@@ -839,7 +836,7 @@ export default function App() {
 
       // Persist per user so multiple users can use the same backend concurrently.
       try {
-        await fetch(`${process.env.REACT_APP_API_URL}/api/timetable/save`, {
+        await fetch(`${REACT_APP_API_URL}/api/timetable/save`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ regNum, timetable: data.timetable || [] }),
@@ -849,7 +846,7 @@ export default function App() {
       }
 
       try {
-        await fetch(`${process.env.REACT_APP_API_URL}/api/users/state`, {
+        await fetch(`${REACT_APP_API_URL}/api/users/state`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
