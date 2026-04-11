@@ -1,7 +1,10 @@
 const User = require("../models/user");
+const { connectToDatabase } = require("../lib/db");
 
 exports.createOrLoginUser = async (req, res) => {
   try {
+    await connectToDatabase();
+
     const { regNum, password } = req.body || {};
     if (!regNum || !password) {
       return res.status(400).json({ error: "regNum and password are required" });
@@ -27,6 +30,8 @@ exports.createOrLoginUser = async (req, res) => {
 
 exports.saveUserState = async (req, res) => {
   try {
+    await connectToDatabase();
+
     const { regNum, wishlist, selections, ttMap, isFinalized } = req.body || {};
     if (!regNum) return res.status(400).json({ error: "regNum is required" });
 
@@ -54,6 +59,8 @@ exports.saveUserState = async (req, res) => {
 
 exports.getUserState = async (req, res) => {
   try {
+    await connectToDatabase();
+
     const regNum = req.query?.regNum;
     if (!regNum) return res.status(400).json({ error: "regNum is required" });
 

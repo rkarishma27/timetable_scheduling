@@ -4,6 +4,7 @@ const Room = require("../models/room");
 const Timetable = require("../models/timetable");
 
 const { schedule } = require("../scheduler/scheduler");
+const { connectToDatabase } = require("../lib/db");
 
 exports.generateTimetable = async (req, res) => {
     try {
@@ -140,6 +141,8 @@ exports.generateTimetable = async (req, res) => {
 
 exports.saveTimetable = async (req, res) => {
     try {
+        await connectToDatabase();
+
         const regNum = req.body?.regNum;
         const timetable = Array.isArray(req.body?.timetable) ? req.body.timetable : [];
 
@@ -158,8 +161,14 @@ exports.saveTimetable = async (req, res) => {
 };
 
 exports.getTimetable = async (req, res) => {
-    const regNum = req.query?.regNum;
-    if (!regNum) return res.status(400).json({ error: "regNum is required" });
-    const data = await Timetable.find({ regNum });
-    res.json(data);
+    try {
+        await connectToDatabase();
+
+        const regNum = req.query?.regNum;
+        if (!regNum) return res.status(400).json({ error: "regNum is required" });
+        const data = await Timetable.find({ regNum });
+        res.json(data);
+    } catch (err) {
+        res.status(503).json({ error: "Database unavailable", detail: err.message });
+    }
 };

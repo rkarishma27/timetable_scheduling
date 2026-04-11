@@ -18,6 +18,7 @@ const TIME_LABELS = [
 
 const MAX_CR = 25;
 const REACT_APP_API_URL = process.env.REACT_APP_API_BASE_URL || "https://timetable-scheduling-pagl.onrender.com";
+const API_TIMEOUT_MS = 25000;
 
 const LAB_PAIRS = [
   "L1+L2","L3+L4","L5+L6","L7+L8","L9+L10","L11+L12",
@@ -638,7 +639,7 @@ function TimetableView({ selections, ttMap, regNum, usedCr, timeLeft, onBack, is
 }
 
 // ─── FINAL REVIEW ──────────────────────────────────────────────────────────
-function FinalPage({ selections, onSubmit }) {
+function FinalPage({ selections, onSubmit, isSubmitting, submitError }) {
   const [confirmed, setConfirmed] = useState(false);
   return (
     <div style={{ padding:30, background:"#0d1117", minHeight:"100vh" }}>
@@ -659,11 +660,12 @@ function FinalPage({ selections, onSubmit }) {
         </label>
       </div>
       <button
-        disabled={!confirmed}
-        style={{ marginTop:20, padding:"10px 20px", background:confirmed?"#238636":"#555", color:"white", border:"none", borderRadius:8, cursor:confirmed?"pointer":"not-allowed" }}
+        disabled={!confirmed || isSubmitting}
+        style={{ marginTop:20, padding:"10px 20px", background:confirmed && !isSubmitting ? "#238636":"#555", color:"white", border:"none", borderRadius:8, cursor:confirmed && !isSubmitting ? "pointer":"not-allowed" }}
         onClick={onSubmit}>
-        Final Submit
+        {isSubmitting ? "Submitting..." : "Final Submit"}
       </button>
+      {submitError && <div style={{ marginTop:12, color:"#ff7b72", fontSize:"0.82rem" }}>{submitError}</div>}
     </div>
   );
 }
@@ -685,6 +687,8 @@ export default function App() {
   const [backendTTMap, setBackendTTMap] = useState(null);
   const [isFinalized, setIsFinalized]     = useState(false);
   const [creditModal, setCreditModal]     = useState(null);
+  const [isSubmittingFinal, setIsSubmittingFinal] = useState(false);
+  const [submitError, setSubmitError] = useState("");
 
   useEffect(() => {
     if (page !== "login" && timeLeft > 0) {
@@ -707,6 +711,22 @@ export default function App() {
   const ttMap = backendTTMap || clientTTMap;
 
   function refreshCap() { setCapText(genCaptcha()); setCapInput(""); }
+
+  async function fetchWithTimeout(url, options = {}, timeoutMs = API_TIMEOUT_MS) {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+    try {
+      return await fetch(url, { ...options, signal: controller.signal });
+    } finally {
+      clearTimeout(timeoutId);
+    }
+  }
+
+  async function getErrorMessage(res, fallback) {
+    const payload = await res.json().catch(() => null);
+    return payload?.error || payload?.message || fallback;
+  }
 
   function buildTTMapFromSavedRows(rows) {
     const map = {};
@@ -764,11 +784,18 @@ export default function App() {
     setPage("wishlist");
   }
 
+  useEffect(() => {
+    if (page === "login") return;
+    fetch(`${REACT_APP_API_URL}/health`).catch(() => {});
+  }, [page]);
+
   function handleLogout() {
     setPage("login"); setSelections([]); setIsFinalized(false); setTimeLeft(2700);
     setRegNum(""); setPassword(""); setCapInput(""); setCapText(genCaptcha()); setLoginErr(""); setCreditModal(null);
     setWishlist([]);
     setBackendTTMap(null);
+    setIsSubmittingFinal(false);
+    setSubmitError("");
   }
 
   const isWishlisted = (code) => wishlist.some((w) => w.course.code === code);
@@ -808,70 +835,71 @@ export default function App() {
     setPage("faculty");
   }
   const handleFinalSubmit = async () => {
-  try {
-    console.log("Sending selections:", selections);
-    setBackendTTMap(null);
+    if (isSubmittingFinal) return;
 
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 5000);
+    setIsSubmittingFinal(true);
+    setSubmitError("");
 
-    const res = await fetch(`${REACT_APP_API_URL}/api/timetable/generate`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({ selections }),
-      signal: controller.signal
-    });
+    try {
+      setBackendTTMap(null);
 
-    clearTimeout(timeout);
+      const res = await fetchWithTimeout(`${REACT_APP_API_URL}/api/timetable/generate`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ selections }),
+      });
 
-    console.log("Response received");
+      if (!res.ok) {
+        throw new Error(await getErrorMessage(res, "Could not generate timetable"));
+      }
 
-    const data = await res.json();
-    console.log("Backend response:", data);
+      const data = await res.json();
+      if (!data.success) {
+        throw new Error(data.message || "Error generating timetable");
+      }
 
-    if (data.success) {
-      setBackendTTMap(data.ttMap || null);
+      const nextTtMap = data.ttMap || {};
+      setBackendTTMap(nextTtMap);
+      setIsFinalized(true);
+      setPage("timetable");
 
-      // Persist per user so multiple users can use the same backend concurrently.
-      try {
-        await fetch(`${REACT_APP_API_URL}/api/timetable/save`, {
+      Promise.allSettled([
+        fetchWithTimeout(`${REACT_APP_API_URL}/api/timetable/save`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ regNum, timetable: data.timetable || [] }),
-        });
-      } catch (saveErr) {
-        console.warn("Save failed:", saveErr);
-      }
-
-      try {
-        await fetch(`${REACT_APP_API_URL}/api/users/state`, {
+        }, 15000),
+        fetchWithTimeout(`${REACT_APP_API_URL}/api/users/state`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             regNum,
             wishlist,
             selections,
-            ttMap: data.ttMap || {},
+            ttMap: nextTtMap,
             isFinalized: true,
           }),
+        }, 15000),
+      ]).then((results) => {
+        results.forEach((result, index) => {
+          if (result.status === "rejected") {
+            console.warn(index === 0 ? "Timetable save failed:" : "User state save failed:", result.reason);
+          }
         });
-      } catch (stateErr) {
-        console.warn("User state save failed:", stateErr);
-      }
-
-      setIsFinalized(true);
-      setPage("timetable");
-    } else {
-      alert("Error generating timetable");
+      });
+    } catch (err) {
+      console.error("ERROR:", err);
+      const message = err.name === "AbortError"
+        ? "Backend took too long to respond. Render may be waking up, so please try again in a few seconds."
+        : (err.message || "Backend connection failed");
+      setSubmitError(message);
+      alert(message);
+    } finally {
+      setIsSubmittingFinal(false);
     }
-
-  } catch (err) {
-    console.error("ERROR:", err);
-    alert("Backend connection failed or timeout");
-  }
-};
+  };
   const catCount = cat => selections.filter(x => x.cat === cat).length;
 
   return (
@@ -1172,6 +1200,8 @@ export default function App() {
   <FinalPage
     selections={selections}
     onSubmit={handleFinalSubmit}
+    isSubmitting={isSubmittingFinal}
+    submitError={submitError}
   />
 )}
 

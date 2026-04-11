@@ -5,6 +5,7 @@ require("dotenv").config();
 const mongoose = require("mongoose");
 const timetableroutes = require("./routes/timetableroutes");
 const userroutes = require("./routes/userroutes");
+const { connectToDatabase, getDbState } = require("./lib/db");
 
 const app = express();
 const isProd = process.env.NODE_ENV === "production";
@@ -40,7 +41,7 @@ app.get("/health", (_req, res) => {
     ok: true,
     service: "timetable-backend",
     timestamp: new Date().toISOString(),
-    dbState: mongoose.connection.readyState,
+    dbState: getDbState(),
   });
 });
 
@@ -51,7 +52,7 @@ if (!isProd) {
       port: Number(process.env.PORT || 5000),
       corsOrigins: allowedOrigins,
       mongoConfigured: Boolean(process.env.MONGO_URI),
-      dbState: mongoose.connection.readyState,
+      dbState: getDbState(),
     });
   });
 }
@@ -69,12 +70,10 @@ app.use((err, _req, res, next) => {
 });
 
 const start = async () => {
-  const mongoUri = process.env.MONGO_URI || "mongodb+srv://timetablescheduler:TS1234@timetablescheduler.jgeqfqk.mongodb.net/?appName=timetablescheduler";
   const port = Number(process.env.PORT || 5000);
   if (isProd && !process.env.MONGO_URI) {
     throw new Error("MONGO_URI is required in production");
   }
-  await mongoose.connect(mongoUri);
   const server = app.listen(port, () => {
     console.log(`Server running on http://localhost:${port}`);
   });
@@ -85,6 +84,14 @@ const start = async () => {
     }
     throw err;
   });
+
+  connectToDatabase()
+    .then(() => {
+      console.log("MongoDB connected");
+    })
+    .catch((err) => {
+      console.error("MongoDB connection failed:", err);
+    });
 };
 
 start().catch((err) => {
